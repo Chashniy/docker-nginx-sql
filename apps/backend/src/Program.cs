@@ -1,5 +1,7 @@
 using Backend.Auth;
 using Backend.Data;
+using Backend.Outbox;
+using Backend.TimeRecords;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -16,6 +18,11 @@ builder.Services.AddDbContext<MariaDbContext>(options =>
 // Auth
 builder.Services.AddSingleton<PasswordHasher>();
 
+// Outbox
+builder.Services.AddSingleton<OutboxRepository>();
+
+builder.Services.AddHostedService<OutboxSyncService>();
+
 var app = builder.Build();
 
 // Явная инициализация SQLite при старте
@@ -29,5 +36,6 @@ app.MapGet("/", () => "Backend is up and running");
 app.MapGet("/api/health", () => new { status = "ok", timestamp = DateTime.UtcNow });
 
 app.MapAuthEndpoints();
+app.MapTimeRecordsEndpoints();
 
 app.Run();

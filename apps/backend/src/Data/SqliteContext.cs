@@ -8,11 +8,9 @@ public class SqliteContext
 
     public SqliteContext(IConfiguration configuration)
     {
-        // Путь к SQLite-файлу. Можно переопределить через appsettings.json.
         var dbPath = configuration["Sqlite:Path"] ?? "/app/data/app.db";
         _connectionString = $"Data Source={dbPath}";
 
-        // Убедимся, что папка существует
         var dir = Path.GetDirectoryName(dbPath);
         if (!string.IsNullOrEmpty(dir))
         {
@@ -27,14 +25,12 @@ public class SqliteContext
         using var connection = new SqliteConnection(_connectionString);
         connection.Open();
 
-        // Включаем WAL — позволяет читать и писать параллельно
         using (var pragma = connection.CreateCommand())
         {
             pragma.CommandText = "PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;";
             pragma.ExecuteNonQuery();
         }
 
-        // Таблица сессий
         using (var cmd = connection.CreateCommand())
         {
             cmd.CommandText = @"
@@ -50,7 +46,6 @@ public class SqliteContext
             cmd.ExecuteNonQuery();
         }
 
-        // Таблица outbox
         using (var cmd = connection.CreateCommand())
         {
             cmd.CommandText = @"
@@ -67,6 +62,12 @@ public class SqliteContext
             ";
             cmd.ExecuteNonQuery();
         }
+    }
+
+    // ← ВОТ ЗДЕСЬ, отдельным методом
+    public SqliteConnection CreateConnection()
+    {
+        return new SqliteConnection(_connectionString);
     }
 
     // === Sessions ===
@@ -117,7 +118,6 @@ public class SqliteContext
         var expiresAt = DateTime.Parse(reader.GetString(2), null, System.Globalization.DateTimeStyles.RoundtripKind);
         if (expiresAt < DateTime.UtcNow)
         {
-            // Сессия просрочена — удаляем и возвращаем null
             DeleteSession(sessionId);
             return null;
         }
