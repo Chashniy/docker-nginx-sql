@@ -1,8 +1,14 @@
+import Clock from './components/Clock';
+import SaveButton from './components/SaveButton';
+import StatusIndicator from './components/StatusIndicator';
+
 export default function App() {
   return (
-    <div>
+    <main>
       <h1>Distributed Clock</h1>
-      <p>Frontend is up and running</p>
-    </div>
+      <Clock />
+      <SaveButton />
+      <StatusIndicator />
+    </main>
   );
 }
