@@ -4,21 +4,179 @@
   box-sizing: border-box;
 }
 
-:root {
-  font-family: system-ui, -apple-system, sans-serif;
-  color: #e0e0e0;
-  background-color: #1a1a1a;
+html, body, #root {
+  min-height: 100vh;
 }
 
 body {
-  min-height: 100vh;
-  display: flex;
-  justify-content: center;
-  align-items: center;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  line-height: 1.5;
+  color: #e0e0e0;
+  background: url('/assets/background1.jpg') center/cover no-repeat fixed;
 }
 
-#root {
+/* === App layout === */
+.app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  max-width: 900px;
+  margin: 0 auto;
+  background-color: rgba(11, 45, 66, 0.7);
+  backdrop-filter: blur(6px);
+}
+
+.app__header {
+  position: relative;      /* ← якорь для absolute */
+  padding: 1.5rem;
+  text-align: center;
+  border-bottom: 2px solid rgba(171, 226, 229, 0.95);
+  border-bottom-right-radius: 24px;
+  border-bottom-left-radius: 24px;
+}
+
+.app__header-content {
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+
+.auth-button {
+  position: absolute;       /* ← вырываем из потока */
+  top: 1.5rem;              /* ← отступ сверху */
+  right: 1.5rem;            /* ← отступ справа */
+  padding: 0.5rem 1rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: rgba(171, 226, 229, 1);
+  background-color: transparent;
+  border: 2px solid rgba(171, 226, 229, 0.95);
+  border-radius: 12px;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background-color 0.15s ease;
+}
+
+.auth-button:hover {
+  background-color: rgba(171, 226, 229, 0.15);
+}
+
+.app__title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: rgba(171, 226, 229, 1);
+  line-height: 1.3;
+}
+
+.app__main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2rem;
+  padding: 2rem 1.5rem;
+}
+
+.realtime {
   width: 100%;
-  max-width: 600px;
-  padding: 2rem;
+  max-width: 500px;
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.5rem;
+  border: 2px solid rgba(171, 226, 229, 0.95);
+  border-radius: 24px;
+  background-color: rgba(11, 45, 66, 0.2);
+  backdrop-filter: blur(6px);
+}
+
+.app__footer {
+
+  padding: 1rem 1.5rem;
+  border-top: 2px solid rgba(171, 226, 229, 0.95);
+  text-align: center;
+  font-size: 0.85rem;
+  color: #547374;
+  border-top-right-radius: 24px;
+  border-top-left-radius: 24px;
+}
+
+.app__footer a {
+  color: #4a9eff;
+  text-decoration: none;
+}
+
+.app__footer a:hover {
+  text-decoration: underline;
+}
+
+/* === Technologies === */
+.technologies {
+  width: 100%;
+  max-width: 500px;
+  padding: 1.5rem;
+  border: 2px solid rgba(171, 226, 229, 0.95);
+  border-radius: 24px;
+  background-color: rgba(11, 45, 66, 0.2);
+  backdrop-filter: blur(6px);
+}
+
+.technologies__title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  margin-bottom: 0.75rem;
+  color: rgba(171, 226, 229, 1);
+  text-align: center;
+}
+
+.technologies__list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.technologies__list li {
+  padding: 0.5rem 0.75rem;
+  background-color: rgba(171, 226, 229, 0.1);
+  border: 1px solid rgba(171, 226, 229, 0.3);
+  border-radius: 12px;
+  font-size: 0.9rem;
+  color: #b8d4d5;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.technologies__list li:hover {
+  background-color: rgba(171, 226, 229, 0.2);
+  border-color: rgba(171, 226, 229, 0.6);
+}
+
+/* === Save Button === */
+.save-button {
+  padding: 0.5rem 1rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  font-family: inherit;
+  color: rgba(171, 226, 229, 1);
+  background-color: transparent;
+  border: 2px solid rgba(171, 226, 229, 0.95);
+  border-radius: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color 0.15s ease;
+}
+
+.save-button:hover {
+  background-color: rgba(171, 226, 229, 0.15);
+}
+
+.save-button:active {
+  background-color: rgba(171, 226, 229, 0.25);
+}
+
+.save-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }

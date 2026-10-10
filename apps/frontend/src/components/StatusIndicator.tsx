@@ -1,3 +1,3 @@
 export default function StatusIndicator() {
-  return <div>Status (заглушка)</div>;
+  return <div className="Button">Status (заглушка)</div>;
 }

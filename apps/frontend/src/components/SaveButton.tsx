@@ -1,3 +1,3 @@
 export default function SaveButton() {
-  return <button>Сохранить</button>;
+  return <button className="save-button">Сохранить</button>;
 }
