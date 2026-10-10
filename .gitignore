@@ -1,0 +1,24 @@
+# Данные контейнеров (генерируются, принадлежат root)
+data/
+data/db-data/
+data/backend/
+
+# Секреты
+.env
+.env.*
+
+# Node.js
+node_modules/
+dist/
+
+# .NET
+bin/
+obj/
+*.user
+
+# Логи
+*.log
+
+# IDE
+.vscode/
+.idea/
