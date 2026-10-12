@@ -21,6 +21,7 @@ builder.Services.AddSingleton<PasswordHasher>();
 // Outbox
 builder.Services.AddSingleton<OutboxRepository>();
 
+// Background service — ДО builder.Build()
 builder.Services.AddHostedService<OutboxSyncService>();
 
 var app = builder.Build();
