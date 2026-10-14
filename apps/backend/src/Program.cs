@@ -38,5 +38,6 @@ app.MapGet("/api/health", () => new { status = "ok", timestamp = DateTime.UtcNow
 
 app.MapAuthEndpoints();
 app.MapTimeRecordsEndpoints();
+app.MapAdminEndpoints();
 
 app.Run();

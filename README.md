@@ -1,12 +1,13 @@
 # Distributed Clock
 
-Учебный проект: распределённая архитектура на Docker с сайтом, который показывает текущее время и дату, и кнопкой сохранения записи в БД.
+Учебный проект: распределённая веб-архитектура на Docker. Сайт показывает текущее время и дату, кнопка сохранения пишет запись в БД. Реализована авторизация (логин + пароль, без email) и планируется админка для управления записями.
 
 ## 🎯 Что делает
 
-- **Публичная страница** — отображает текущее время и дату, кнопка «Сохранить» пишет запись в БД.
+- **Публичная страница** (`/`) — отображает текущее время и дату, кнопка «Сохранить» пишет запись в БД.
+- **Авторизация** (`/login`) — регистрация и вход по логину/паролю.
+- **Админка** (`/admin`) — таблица записей, редактирование, удаление *(в разработке)*.
 - **API** — принимает запросы от фронтенда, буферизует записи в SQLite и синхронизирует с MariaDB.
-- **Админка** *(план)* — таблица записей, редактирование, удаление, авторизация.
 
 ## 🏗️ Архитектура
 
@@ -24,13 +25,35 @@
 |---|---|---|
 | `dns-nginx` | `nginx:1.27-alpine` | Reverse-proxy, торчит на порту 80 |
 | `dns-frontend` | `dns-frontend:dev` | React-статика, раздаётся через Nginx |
-| `dns-backend` | `dns-backend:dev` | ASP.NET Core API + SQLite outbox |
+| `dns-backend` | `dns-backend:dev` | ASP.NET Core API + SQLite |
 | `dns-mariadb` | `mariadb:11` | Основное хранилище |
 
 ### Роли хранилищ
 
-- **MariaDB** — источник правды. Таблица `time_records`.
-- **SQLite** *(план)* — outbox-буфер. Если MariaDB недоступна, записи копятся локально и уходят позже.
+- **MariaDB** — источник правды. Таблицы `users`, `time_records`.
+- **SQLite** — две роли:
+  - `sessions` — сессии авторизации (cookie-based auth).
+  - `outbox` — буфер для записей времени перед синхронизацией с MariaDB.
+
+### Поток данных
+
+```
+Frontend → POST /api/time-records
+              ↓
+        Backend принимает
+              ↓
+        Пишет в SQLite outbox (status='pending')
+              ↓
+        Отвечает 202 Accepted
+              ↓
+        BackgroundService (раз в 5 сек)
+              ↓
+        Идемпотентно вставляет в MariaDB
+              ↓
+        Помечает status='synced'
+```
+
+Это паттерн **Transactional Outbox** — устойчивость к падению MariaDB.
 
 ## 📁 Структура
 
@@ -40,7 +63,13 @@
 │   ├── backend/          # ASP.NET Core
 │   │   ├── Dockerfile
 │   │   ├── backend.csproj
-│   │   └── Program.cs
+│   │   └── src/
+│   │       ├── Program.cs
+│   │       ├── Auth/             # PasswordHasher, SessionMiddleware, AuthEndpoints
+│   │       ├── Data/             # MariaDbContext, SqliteContext
+│   │       ├── Models/           # User, TimeRecord
+│   │       ├── Outbox/           # OutboxRepository, OutboxSyncService
+│   │       └── TimeRecords/      # TimeRecordsEndpoints, AdminEndpoints
 │   └── frontend/         # React + TypeScript + Vite
 │       ├── Dockerfile
 │       ├── package.json
@@ -68,7 +97,7 @@
 ```bash
 # Backend
 cd apps/backend
-sudo docker build -t dns-backend:dev .
+sudo docker build --network=host -t dns-backend:dev .
 
 # Frontend
 cd apps/frontend
@@ -116,6 +145,7 @@ sudo docker run -d \
 
 ```bash
 sudo docker ps
+curl http://localhost/api/health
 curl http://localhost
 ```
 
@@ -131,34 +161,71 @@ sudo docker start dns-mariadb dns-backend dns-frontend dns-nginx
 
 ## 📊 API
 
+### Публичные
+
 | Метод | Путь | Описание |
 |---|---|---|
-| `GET` | `/api/health` | Статус backend *(план)* |
-| `POST` | `/api/time-records` | Сохранить текущую дату и время *(план)* |
-| `GET` | `/api/admin/time-records` | Список записей *(план)* |
+| `GET` | `/api/health` | Статус backend |
+| `POST` | `/api/time-records` | Сохранить текущую дату и время (202 Accepted) |
+
+### Auth
+
+| Метод | Путь | Описание |
+|---|---|---|
+| `POST` | `/api/auth/register` | Регистрация (создаёт пользователя + сессию) |
+| `POST` | `/api/auth/login` | Вход (создаёт сессию) |
+| `POST` | `/api/auth/logout` | Выход (удаляет сессию) |
+| `GET` | `/api/auth/me` | Текущий пользователь (или 401) |
+
+### Admin *(в разработке)*
+
+| Метод | Путь | Описание |
+|---|---|---|
+| `GET` | `/api/admin/time-records` | Список записей |
+| `PUT` | `/api/admin/time-records/{id}` | Редактирование |
+| `DELETE` | `/api/admin/time-records/{id}` | Удаление |
 
 ## 🗄️ Схема БД
 
 ### MariaDB
 
 ```sql
+CREATE TABLE users (
+    id            CHAR(36) PRIMARY KEY,
+    username      VARCHAR(64) NOT NULL UNIQUE,
+    password_hash VARCHAR(255) NOT NULL,
+    created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE time_records (
-    id CHAR(36) PRIMARY KEY,
+    id          CHAR(36) PRIMARY KEY,
     recorded_at DATETIME NOT NULL,
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_by  CHAR(36),
+    created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
 );
 ```
 
-### SQLite (outbox, план)
+### SQLite
 
 ```sql
-CREATE TABLE outbox (
-    id TEXT PRIMARY KEY,
-    payload TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'pending',
-    attempts INTEGER NOT NULL DEFAULT 0,
-    last_error TEXT,
+-- Сессии авторизации
+CREATE TABLE sessions (
+    id         TEXT PRIMARY KEY,
+    user_id    TEXT NOT NULL,
+    username   TEXT NOT NULL,
     created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+);
+
+-- Outbox для синхронизации с MariaDB
+CREATE TABLE outbox (
+    id            TEXT PRIMARY KEY,
+    payload       TEXT NOT NULL,
+    status        TEXT NOT NULL DEFAULT 'pending',
+    attempts      INTEGER NOT NULL DEFAULT 0,
+    last_error    TEXT,
+    created_at    TEXT NOT NULL,
     next_retry_at TEXT
 );
 ```
@@ -167,17 +234,25 @@ CREATE TABLE outbox (
 
 - [x] Инфраструктура: Docker-сеть, 4 контейнера
 - [x] Nginx как reverse-proxy
-- [x] MariaDB + таблица `time_records`
-- [x] Backend: ASP.NET Core (заглушка)
-- [x] Frontend: React + TypeScript + Vite (заглушка)
-- [ ] Backend: `POST /api/time-records`
-- [ ] Backend: SQLite outbox + BackgroundService
-- [ ] Frontend: часы, кнопка, индикатор статуса
-- [ ] Auth: логин + пароль
-- [ ] Админка: CRUD для записей
+- [x] MariaDB + таблицы `users`, `time_records`
+- [x] Backend: ASP.NET Core
+- [x] SQLite: сессии + outbox
+- [x] Auth: регистрация, логин, логаут, `/me`
+- [x] `POST /api/time-records` (аноним + авторизован)
+- [x] OutboxSyncService: синхронизация SQLite → MariaDB
+- [ ] Admin API: `GET/PUT/DELETE /api/admin/time-records`
+- [ ] Frontend: роутинг (`/`, `/login`, `/admin`)
+- [ ] Frontend: форма логина/регистрации
+- [ ] Frontend: админка с таблицей
+- [ ] Frontend: живые компоненты (часы, кнопка, статус)
+- [ ] `docker-compose.yml`
+- [ ] `.env` для секретов
 
 ## 📌 Заметки
 
 - Данные контейнеров лежат в `data/` и **не коммитятся** в git.
 - Пароли в командах `docker run` — **учебные**. В продакшене — через `.env` и секреты.
 - Nginx использует `resolver 127.0.0.11` для Docker DNS — чтобы не падать, если backend/frontend недоступны.
+- SQLite работает в WAL-режиме (`journal_mode=WAL`) для параллельного чтения/записи.
+- Пароли хешируются через BCrypt (work factor 11).
+- Сессии хранятся в SQLite, cookie — HttpOnly + SameSite=Lax.
