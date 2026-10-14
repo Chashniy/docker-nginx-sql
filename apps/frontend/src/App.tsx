@@ -23,16 +23,9 @@ export default function App() {
 
           <div className="app__header-actions">
             {user ? (
-              <>
-                {user.role === 'admin' && (
-                  <Link to="/admin" className="auth-button">
-                    Админка
-                  </Link>
-                )}
-                <button onClick={logout} className="auth-button">
-                  Выйти
-                </button>
-              </>
+              <button onClick={logout} className="auth-button">
+                Выйти
+              </button>
             ) : (
               <Link to="/login" className="auth-button">
                 Войти

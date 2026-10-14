@@ -3,6 +3,7 @@ import { createContext, useContext, useEffect, useState, ReactNode } from 'react
 interface User {
   id: string;
   username: string;
+  role: string;   // ← добавили
 }
 
 interface AuthContextValue {

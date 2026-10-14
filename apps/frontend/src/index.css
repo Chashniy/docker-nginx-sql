@@ -35,16 +35,17 @@ body {
   border-bottom-left-radius: 24px;
 }
 
-.app__header-content {
-  justify-content: space-between;
-  align-items: center;
-  gap: 1rem;
+.app__header-actions {
+  position: absolute;       /* ← якорь теперь на контейнере */
+  top: 1.5rem;
+  right: 1.5rem;
+  display: flex;
+  flex-direction: column;   /* ← кнопки друг под другом */
+  gap: 0.5rem;
+  align-items: flex-end;    /* ← прижаты к правому краю */
 }
 
 .auth-button {
-  position: absolute;       /* ← вырываем из потока */
-  top: 1.5rem;              /* ← отступ сверху */
-  right: 1.5rem;            /* ← отступ справа */
   padding: 0.5rem 1rem;
   font-size: 0.9rem;
   font-weight: 600;
@@ -54,6 +55,8 @@ body {
   border-radius: 12px;
   text-decoration: none;
   white-space: nowrap;
+  cursor: pointer;
+  font-family: inherit;
   transition: background-color 0.15s ease;
 }
 
@@ -367,4 +370,95 @@ body {
 
 .btn--danger:hover:not(:disabled) {
   background-color: rgba(220, 80, 80, 0.15);
+}
+
+/* === Clock === */
+.clock {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.clock__time {
+  font-size: 2.5rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: rgba(171, 226, 229, 1);
+  letter-spacing: 0.05em;
+}
+
+.clock__date {
+  font-size: 0.95rem;
+  color: #b8d4d5;
+  text-transform: capitalize;
+}
+
+/* === Save block === */
+.save-block {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.save-message {
+  font-size: 0.85rem;
+  padding: 0.3rem 0.6rem;
+  border-radius: 6px;
+}
+
+.save-message--success {
+  background-color: rgba(80, 200, 120, 0.15);
+  color: #99ffb3;
+}
+
+.save-message--error {
+  background-color: rgba(220, 80, 80, 0.15);
+  color: #ff9999;
+}
+
+/* === Status === */
+.status {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  padding: 0.3rem 0.6rem;
+  border-radius: 8px;
+  background-color: rgba(0, 0, 0, 0.2);
+}
+
+.status__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background-color: #888;
+}
+
+.status--loading .status__dot {
+  background-color: #f0c040;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.status--ok .status__dot {
+  background-color: #50c878;
+}
+
+.status--error .status__dot {
+  background-color: #dc5050;
+}
+
+.status__label {
+  color: #b8d4d5;
+}
+
+.status__time {
+  color: #547374;
+  font-size: 0.75rem;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
 }
