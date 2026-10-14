@@ -10,17 +10,16 @@ public static class AdminEndpoints
     public static void MapAdminEndpoints(this WebApplication app)
     {
         var group = app.MapGroup("/api/admin")
-            .AddEndpointFilter<RequireAuthFilter>();
+            .AddEndpointFilter<RequireAdminFilter>();
 
-        // GET /api/admin/time-records — список с username
-        group.MapGet("/time-records", async (MariaDbContext db, HttpContext http) =>
+        // GET /api/admin/time-records
+        group.MapGet("/time-records", async (MariaDbContext db) =>
         {
             var records = await db.TimeRecords
                 .OrderByDescending(r => r.RecordedAt)
                 .Take(200)
                 .ToListAsync();
 
-            // Собираем user_id → username
             var userIds = records
                 .Where(r => r.CreatedBy != null)
                 .Select(r => r.CreatedBy!.Value)
@@ -45,7 +44,7 @@ public static class AdminEndpoints
             return Results.Ok(result);
         });
 
-        // PUT /api/admin/time-records/{id} — редактирование
+        // PUT /api/admin/time-records/{id}
         group.MapPut("/time-records/{id}", async (
             string id,
             UpdateTimeRecordRequest request,
@@ -72,7 +71,7 @@ public static class AdminEndpoints
             });
         });
 
-        // DELETE /api/admin/time-records/{id} — удаление
+        // DELETE /api/admin/time-records/{id}
         group.MapDelete("/time-records/{id}", async (string id, MariaDbContext db) =>
         {
             if (!Guid.TryParse(id, out var guid))
@@ -94,8 +93,8 @@ public static class AdminEndpoints
     }
 }
 
-// === Фильтр авторизации ===
-public class RequireAuthFilter : IEndpointFilter
+// === Фильтр: только для admin ===
+public class RequireAdminFilter : IEndpointFilter
 {
     public async ValueTask<object?> InvokeAsync(
         EndpointFilterInvocationContext context,
@@ -104,14 +103,26 @@ public class RequireAuthFilter : IEndpointFilter
         var http = context.HttpContext;
         var userId = http.Items[SessionMiddleware.UserIdKey] as string;
 
-        if (string.IsNullOrEmpty(userId))
+        if (string.IsNullOrEmpty(userId) || !Guid.TryParse(userId, out var guid))
         {
             return Results.Unauthorized();
+        }
+
+        var db = http.RequestServices.GetRequiredService<MariaDbContext>();
+        var user = await db.Users.FirstOrDefaultAsync(u => u.Id == guid);
+
+        if (user == null)
+        {
+            return Results.Unauthorized();
+        }
+
+        if (user.Role != "admin")
+        {
+            return Results.Forbid();
         }
 
         return await next(context);
     }
 }
 
-// === DTO ===
 public record UpdateTimeRecordRequest(DateTime RecordedAt);

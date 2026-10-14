@@ -180,3 +180,191 @@ body {
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+.login-form {
+  width: 100%;
+  max-width: 400px;
+  padding: 2rem;
+  border: 2px solid rgba(171, 226, 229, 0.95);
+  border-radius: 24px;
+  background-color: rgba(11, 45, 66, 0.7);
+  backdrop-filter: blur(6px);
+}
+
+.login-form__title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: rgba(171, 226, 229, 1);
+  margin-bottom: 1.5rem;
+  text-align: center;
+}
+
+.login-form__form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.login-form__label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.9rem;
+  color: #b8d4d5;
+}
+
+.login-form__input {
+  padding: 0.5rem 0.75rem;
+  background-color: rgba(26, 26, 26, 0.5);
+  border: 1px solid rgba(171, 226, 229, 0.3);
+  border-radius: 8px;
+  color: #e0e0e0;
+  font-size: 1rem;
+  font-family: inherit;
+  outline: none;
+}
+
+.login-form__input:focus {
+  border-color: rgba(171, 226, 229, 0.8);
+}
+
+.login-form__error {
+  padding: 0.5rem 0.75rem;
+  background-color: rgba(220, 80, 80, 0.2);
+  border: 1px solid rgba(220, 80, 80, 0.5);
+  border-radius: 8px;
+  color: #ff9999;
+  font-size: 0.85rem;
+}
+
+.login-form__toggle {
+  margin-top: 1rem;
+  width: 100%;
+  padding: 0.5rem;
+  background: none;
+  border: none;
+  color: rgba(171, 226, 229, 0.8);
+  cursor: pointer;
+  font-size: 0.85rem;
+  text-decoration: underline;
+}
+
+.login-form__toggle:hover {
+  color: rgba(171, 226, 229, 1);
+}
+
+.btn {
+  padding: 0.6rem 1rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  font-family: inherit;
+  color: rgba(171, 226, 229, 1);
+  background-color: transparent;
+  border: 2px solid rgba(171, 226, 229, 0.95);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.btn:hover:not(:disabled) {
+  background-color: rgba(171, 226, 229, 0.15);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.admin {
+  width: 100%;
+  max-width: 1100px;
+  padding: 1.5rem;
+  border: 2px solid rgba(171, 226, 229, 0.95);
+  border-radius: 24px;
+  background-color: rgba(11, 45, 66, 0.7);
+  backdrop-filter: blur(6px);
+}
+
+.admin__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+
+.admin__title {
+  font-size: 1.3rem;
+  color: rgba(171, 226, 229, 1);
+}
+
+.admin__user {
+  font-size: 0.9rem;
+  color: #b8d4d5;
+  margin-bottom: 1rem;
+}
+
+.admin__empty {
+  text-align: center;
+  color: #888;
+  padding: 2rem;
+}
+
+.admin__table-wrapper {
+  overflow-x: auto;
+}
+
+.admin__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.admin__table th,
+.admin__table td {
+  padding: 0.6rem 0.8rem;
+  text-align: left;
+  border-bottom: 1px solid rgba(171, 226, 229, 0.2);
+}
+
+.admin__table th {
+  color: rgba(171, 226, 229, 1);
+  font-weight: 600;
+  background-color: rgba(171, 226, 229, 0.05);
+}
+
+.admin__table tr:hover {
+  background-color: rgba(171, 226, 229, 0.05);
+}
+
+.admin__cell-id {
+  font-family: monospace;
+  color: #888;
+}
+
+.admin__anon {
+  color: #888;
+  font-style: italic;
+}
+
+.admin__actions {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.btn--small {
+  padding: 0.3rem 0.6rem;
+  font-size: 0.8rem;
+  border-radius: 8px;
+}
+
+.btn--danger {
+  border-color: rgba(220, 80, 80, 0.8);
+  color: #ff9999;
+}
+
+.btn--danger:hover:not(:disabled) {
+  background-color: rgba(220, 80, 80, 0.15);
+}

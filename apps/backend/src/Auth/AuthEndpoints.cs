@@ -36,11 +36,15 @@ public static class AuthEndpoints
                 return Results.Conflict(new { error = "Username already taken" });
             }
 
+            // Первый зарегистрированный пользователь становится админом
+            var isFirstUser = !await db.Users.AnyAsync();
+
             var user = new User
             {
                 Id = Guid.NewGuid(),
                 Username = request.Username,
                 PasswordHash = hasher.Hash(request.Password),
+                Role = isFirstUser ? "admin" : "user",
                 CreatedAt = DateTime.UtcNow
             };
 
@@ -57,7 +61,12 @@ public static class AuthEndpoints
                 Expires = DateTimeOffset.UtcNow.Add(SessionTtl)
             });
 
-            return Results.Ok(new { id = user.Id.ToString(), username = user.Username });
+            return Results.Ok(new
+            {
+                id = user.Id.ToString(),
+                username = user.Username,
+                role = user.Role
+            });
         });
 
         // POST /api/auth/login
@@ -84,7 +93,12 @@ public static class AuthEndpoints
                 Expires = DateTimeOffset.UtcNow.Add(SessionTtl)
             });
 
-            return Results.Ok(new { id = user.Id.ToString(), username = user.Username });
+            return Results.Ok(new
+            {
+                id = user.Id.ToString(),
+                username = user.Username,
+                role = user.Role
+            });
         });
 
         // POST /api/auth/logout
@@ -101,17 +115,26 @@ public static class AuthEndpoints
         });
 
         // GET /api/auth/me
-        group.MapGet("/me", (HttpContext http) =>
+        group.MapGet("/me", async (HttpContext http, MariaDbContext db) =>
         {
             var userId = http.Items[SessionMiddleware.UserIdKey] as string;
-            var username = http.Items[SessionMiddleware.UsernameKey] as string;
-
-            if (userId == null || username == null)
+            if (string.IsNullOrEmpty(userId) || !Guid.TryParse(userId, out var guid))
             {
                 return Results.Unauthorized();
             }
 
-            return Results.Ok(new { id = userId, username });
+            var user = await db.Users.FirstOrDefaultAsync(u => u.Id == guid);
+            if (user == null)
+            {
+                return Results.Unauthorized();
+            }
+
+            return Results.Ok(new
+            {
+                id = user.Id.ToString(),
+                username = user.Username,
+                role = user.Role
+            });
         });
     }
 }

@@ -1,4 +1,4 @@
-import { Routes, Route, Link, useLocation } from 'react-router-dom';
+import { Routes, Route, Link } from 'react-router-dom';
 import { useAuth } from './AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import HomePage from './pages/HomePage';
@@ -7,10 +7,6 @@ import AdminPage from './pages/AdminPage';
 
 export default function App() {
   const { user, logout } = useAuth();
-  const location = useLocation();
-
-  // На странице логина не показываем кнопки авторизации
-  const isLoginPage = location.pathname === '/login';
 
   return (
     <div className="app">
@@ -18,23 +14,31 @@ export default function App() {
         <div className="app__header-content">
           <div>
             <Link to="/" className="app__title-link">
-              <h1 className="app__title">Зачем тебе сохранять время на каком-то левом сайте?</h1>
+              <h1 className="app__title">
+                Зачем тебе сохранять время на каком-то левом сайте?
+              </h1>
             </Link>
             <p className="app__subtitle">Распределённое web-приложение</p>
           </div>
 
-          {!isLoginPage && (
-            <div className="app__header-actions">
-              {user ? (
-                <>
-                  <Link to="/admin" className="auth-button">Админка</Link>
-                  <button onClick={logout} className="auth-button">Выйти</button>
-                </>
-              ) : (
-                <Link to="/login" className="auth-button">Войти</Link>
-              )}
-            </div>
-          )}
+          <div className="app__header-actions">
+            {user ? (
+              <>
+                {user.role === 'admin' && (
+                  <Link to="/admin" className="auth-button">
+                    Админка
+                  </Link>
+                )}
+                <button onClick={logout} className="auth-button">
+                  Выйти
+                </button>
+              </>
+            ) : (
+              <Link to="/login" className="auth-button">
+                Войти
+              </Link>
+            )}
+          </div>
         </div>
       </header>
 
@@ -45,7 +49,7 @@ export default function App() {
           <Route
             path="/admin"
             element={
-              <ProtectedRoute>
+              <ProtectedRoute requireAdmin>
                 <AdminPage />
               </ProtectedRoute>
             }
@@ -56,7 +60,11 @@ export default function App() {
       <footer className="app__footer">
         <p>
           GitHub проекта:{' '}
-          <a href="https://github.com/Chashniy/docker-nginx-sql" target="_blank" rel="noopener noreferrer">
+          <a
+            href="https://github.com/Chashniy/docker-nginx-sql"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
             github.com/Chashniy/docker-nginx-sql
           </a>
         </p>
