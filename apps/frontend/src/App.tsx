@@ -1,40 +1,56 @@
-import Clock from './components/Clock';
-import SaveButton from './components/SaveButton';
-import StatusIndicator from './components/StatusIndicator';
-import AuthButton from './components/AuthButton';
+import { Routes, Route, Link, useLocation } from 'react-router-dom';
+import { useAuth } from './AuthContext';
+import ProtectedRoute from './components/ProtectedRoute';
+import HomePage from './pages/HomePage';
+import LoginPage from './pages/LoginPage';
+import AdminPage from './pages/AdminPage';
 
 export default function App() {
+  const { user, logout } = useAuth();
+  const location = useLocation();
+
+  // На странице логина не показываем кнопки авторизации
+  const isLoginPage = location.pathname === '/login';
+
   return (
     <div className="app">
       <header className="app__header">
         <div className="app__header-content">
           <div>
-            <h1 className="app__title">Зачем тебе сохранять время на каком-то левом сайте?</h1>
-            <p>Распределённое web-приложение</p>
+            <Link to="/" className="app__title-link">
+              <h1 className="app__title">Зачем тебе сохранять время на каком-то левом сайте?</h1>
+            </Link>
+            <p className="app__subtitle">Распределённое web-приложение</p>
           </div>
-          <AuthButton />
+
+          {!isLoginPage && (
+            <div className="app__header-actions">
+              {user ? (
+                <>
+                  <Link to="/admin" className="auth-button">Админка</Link>
+                  <button onClick={logout} className="auth-button">Выйти</button>
+                </>
+              ) : (
+                <Link to="/login" className="auth-button">Войти</Link>
+              )}
+            </div>
+          )}
         </div>
       </header>
 
       <main className="app__main">
-        <div className="realtime">
-          <Clock />
-          <SaveButton />
-          <StatusIndicator />
-        </div>
-
-        <div className="technologies">
-          <h2 className="technologies__title">Используемые технологии</h2>
-          <ul className="technologies__list">
-            <li>Docker + Docker Compose</li>
-            <li>Nginx (reverse-proxy)</li>
-            <li>MariaDB (основное хранилище)</li>
-            <li>SQLite (outbox-буфер)</li>
-            <li>ASP.NET Core (backend)</li>
-            <li>React + TypeScript (frontend)</li>
-            <li>Vite (сборка)</li>
-          </ul>
-        </div>
+        <Routes>
+          <Route path="/" element={<HomePage />} />
+          <Route path="/login" element={<LoginPage />} />
+          <Route
+            path="/admin"
+            element={
+              <ProtectedRoute>
+                <AdminPage />
+              </ProtectedRoute>
+            }
+          />
+        </Routes>
       </main>
 
       <footer className="app__footer">
