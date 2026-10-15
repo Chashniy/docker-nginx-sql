@@ -1,13 +1,13 @@
 # Distributed Clock
 
-Учебный проект: распределённая веб-архитектура на Docker. Сайт показывает текущее время и дату, кнопка сохранения пишет запись в БД. Реализована авторизация (логин + пароль, без email) и планируется админка для управления записями.
+Учебный проект: распределённое веб-приложение на Docker. Сайт показывает текущее время и дату, кнопка «Сохранить» пишет запись в БД. Реализованы авторизация (логин + пароль), роли (`admin` / `user`) и админка.
 
 ## 🎯 Что делает
 
-- **Публичная страница** (`/`) — отображает текущее время и дату, кнопка «Сохранить» пишет запись в БД.
+- **Публичная страница** (`/`) — текущее время, дата, кнопка «Сохранить».
 - **Авторизация** (`/login`) — регистрация и вход по логину/паролю.
-- **Админка** (`/admin`) — таблица записей, редактирование, удаление *(в разработке)*.
-- **API** — принимает запросы от фронтенда, буферизует записи в SQLite и синхронизирует с MariaDB.
+- **Админка** (`/admin`) — таблица записей, редактирование, удаление (только для `admin`).
+- **API** — принимает запросы, буферизует в SQLite outbox, синхронизирует с MariaDB.
 
 ## 🏗️ Архитектура
 
@@ -23,37 +23,35 @@
 
 | Контейнер | Образ | Роль |
 |---|---|---|
-| `dns-nginx` | `nginx:1.27-alpine` | Reverse-proxy, торчит на порту 80 |
-| `dns-frontend` | `dns-frontend:dev` | React-статика, раздаётся через Nginx |
+| `dns-nginx` | `nginx:1.27-alpine` | Reverse-proxy, порт 80 |
+| `dns-frontend` | `dns-frontend:dev` | React-статика |
 | `dns-backend` | `dns-backend:dev` | ASP.NET Core API + SQLite |
 | `dns-mariadb` | `mariadb:11` | Основное хранилище |
 
-### Роли хранилищ
+### Хранилища
 
 - **MariaDB** — источник правды. Таблицы `users`, `time_records`.
 - **SQLite** — две роли:
   - `sessions` — сессии авторизации (cookie-based auth).
-  - `outbox` — буфер для записей времени перед синхронизацией с MariaDB.
+  - `outbox` — буфер для записей перед синхронизацией с MariaDB (паттерн **Transactional Outbox**).
 
 ### Поток данных
 
 ```
 Frontend → POST /api/time-records
               ↓
-        Backend принимает
+        Backend принимает (берёт user_id из сессии)
               ↓
         Пишет в SQLite outbox (status='pending')
               ↓
         Отвечает 202 Accepted
               ↓
-        BackgroundService (раз в 5 сек)
+        OutboxSyncService (раз в 5 сек)
               ↓
         Идемпотентно вставляет в MariaDB
               ↓
         Помечает status='synced'
 ```
-
-Это паттерн **Transactional Outbox** — устойчивость к падению MariaDB.
 
 ## 📁 Структура
 
@@ -75,13 +73,23 @@ Frontend → POST /api/time-records
 │       ├── package.json
 │       ├── nginx.conf
 │       └── src/
+│           ├── AuthContext.tsx
+│           ├── App.tsx
+│           ├── pages/            # HomePage, LoginPage, AdminPage
+│           └── components/       # Clock, SaveButton, StatusIndicator, ProtectedRoute
 ├── config/
 │   └── nginx/            # nginx.conf внешнего балансировщика
 ├── data/                 # Персистентные данные (не в git)
 │   ├── db-data/          # MariaDB
 │   └── backend/          # SQLite
 ├── db/
-│   └── mariadb-init.sql  # Схема БД при первой инициализации
+│   └── mariadb-init.sql  # Схема БД
+├── docs/
+│   ├── ARCHITECTURE.md   # Подробное устройство, все термины
+│   └── TROUBLESHOOTING.md # Проблемы и решения
+├── .env.example
+├── .gitignore
+├── docker-compose.yml
 └── README.md
 ```
 
@@ -89,75 +97,50 @@ Frontend → POST /api/time-records
 
 ### Предварительно
 
-- Docker и Docker Compose
-- Сеть `dns-net`: `sudo docker network create dns-net`
+- Docker + Docker Compose
+- Собраны образы:
+  ```bash
+  cd apps/backend && sudo docker build --network=host -t dns-backend:dev .
+  cd apps/frontend && sudo docker build --network=host -t dns-frontend:dev .
+  ```
 
-### Сборка образов
+### Настройка
 
+Скопируй `.env.example` в `.env` и **поменяй пароли**:
 ```bash
-# Backend
-cd apps/backend
-sudo docker build --network=host -t dns-backend:dev .
-
-# Frontend
-cd apps/frontend
-sudo docker build --network=host -t dns-frontend:dev .
+cp .env.example .env
+nano .env
 ```
 
-### Запуск контейнеров
+### Запуск
 
 ```bash
-# 1. MariaDB
-sudo docker run -d \
-  --name dns-mariadb \
-  --network dns-net \
-  -e MARIADB_ROOT_PASSWORD=root_secret \
-  -e MARIADB_DATABASE=clock_db \
-  -e MARIADB_USER=clock_user \
-  -e MARIADB_PASSWORD=clock_pass \
-  -v $PWD/data/db-data:/var/lib/mysql \
-  -v $PWD/db/mariadb-init.sql:/docker-entrypoint-initdb.d/init.sql:ro \
-  mariadb:11
-
-# 2. Backend
-sudo docker run -d \
-  --name dns-backend \
-  --network dns-net \
-  -v $PWD/data/backend:/app/data \
-  dns-backend:dev
-
-# 3. Frontend
-sudo docker run -d \
-  --name dns-frontend \
-  --network dns-net \
-  dns-frontend:dev
-
-# 4. Внешний Nginx
-sudo docker run -d \
-  --name dns-nginx \
-  --network dns-net \
-  -p 80:80 \
-  -v $PWD/config/nginx/nginx.conf:/etc/nginx/nginx.conf:ro \
-  nginx:1.27-alpine
+sudo docker compose up -d
 ```
 
 ### Проверка
 
 ```bash
-sudo docker ps
+sudo docker compose ps
 curl http://localhost/api/health
-curl http://localhost
 ```
 
-## 🛠️ Остановка и запуск
+Открой `http://localhost` — увидишь сайт.
+
+### Остановка
 
 ```bash
-# Остановить все контейнеры
-sudo docker stop dns-nginx dns-frontend dns-backend dns-mariadb
-
-# Запустить обратно
-sudo docker start dns-mariadb dns-backend dns-frontend dns-nginx
+sudo docker compose down       # остановить (данные сохранятся)
+sudo docker compose down -v    # остановить + удалить volumes
 ```
+
+## 🔐 Первый пользователь
+
+**Первый** зарегистрированный пользователь автоматически становится **`admin`**. Остальные — **`user`**.
+
+**Регистрация:** `http://localhost/login` → «Нет аккаунта? Зарегистрироваться».
+
+**Админка** доступна только `admin` — ссылка «Перейти в админку →» появится на главной.
 
 ## 📊 API
 
@@ -166,18 +149,18 @@ sudo docker start dns-mariadb dns-backend dns-frontend dns-nginx
 | Метод | Путь | Описание |
 |---|---|---|
 | `GET` | `/api/health` | Статус backend |
-| `POST` | `/api/time-records` | Сохранить текущую дату и время (202 Accepted) |
+| `POST` | `/api/time-records` | Сохранить время (202 Accepted) |
 
 ### Auth
 
 | Метод | Путь | Описание |
 |---|---|---|
-| `POST` | `/api/auth/register` | Регистрация (создаёт пользователя + сессию) |
-| `POST` | `/api/auth/login` | Вход (создаёт сессию) |
-| `POST` | `/api/auth/logout` | Выход (удаляет сессию) |
-| `GET` | `/api/auth/me` | Текущий пользователь (или 401) |
+| `POST` | `/api/auth/register` | Регистрация |
+| `POST` | `/api/auth/login` | Вход |
+| `POST` | `/api/auth/logout` | Выход |
+| `GET` | `/api/auth/me` | Текущий пользователь |
 
-### Admin *(в разработке)*
+### Admin (только для `admin`)
 
 | Метод | Путь | Описание |
 |---|---|---|
@@ -194,6 +177,7 @@ CREATE TABLE users (
     id            CHAR(36) PRIMARY KEY,
     username      VARCHAR(64) NOT NULL UNIQUE,
     password_hash VARCHAR(255) NOT NULL,
+    role          VARCHAR(16) NOT NULL DEFAULT 'user',
     created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -209,7 +193,6 @@ CREATE TABLE time_records (
 ### SQLite
 
 ```sql
--- Сессии авторизации
 CREATE TABLE sessions (
     id         TEXT PRIMARY KEY,
     user_id    TEXT NOT NULL,
@@ -218,7 +201,6 @@ CREATE TABLE sessions (
     expires_at TEXT NOT NULL
 );
 
--- Outbox для синхронизации с MariaDB
 CREATE TABLE outbox (
     id            TEXT PRIMARY KEY,
     payload       TEXT NOT NULL,
@@ -234,25 +216,28 @@ CREATE TABLE outbox (
 
 - [x] Инфраструктура: Docker-сеть, 4 контейнера
 - [x] Nginx как reverse-proxy
-- [x] MariaDB + таблицы `users`, `time_records`
+- [x] MariaDB: `users`, `time_records` + роли
 - [x] Backend: ASP.NET Core
 - [x] SQLite: сессии + outbox
 - [x] Auth: регистрация, логин, логаут, `/me`
+- [x] Роли: первый пользователь = `admin`
 - [x] `POST /api/time-records` (аноним + авторизован)
 - [x] OutboxSyncService: синхронизация SQLite → MariaDB
-- [ ] Admin API: `GET/PUT/DELETE /api/admin/time-records`
-- [ ] Frontend: роутинг (`/`, `/login`, `/admin`)
-- [ ] Frontend: форма логина/регистрации
-- [ ] Frontend: админка с таблицей
-- [ ] Frontend: живые компоненты (часы, кнопка, статус)
-- [ ] `docker-compose.yml`
-- [ ] `.env` для секретов
+- [x] Admin API: `GET/PUT/DELETE /api/admin/time-records`
+- [x] Frontend: роутинг, формы, админка, живые компоненты
+- [x] `docker-compose.yml` + `.env`
 
 ## 📌 Заметки
 
-- Данные контейнеров лежат в `data/` и **не коммитятся** в git.
-- Пароли в командах `docker run` — **учебные**. В продакшене — через `.env` и секреты.
-- Nginx использует `resolver 127.0.0.11` для Docker DNS — чтобы не падать, если backend/frontend недоступны.
-- SQLite работает в WAL-режиме (`journal_mode=WAL`) для параллельного чтения/записи.
-- Пароли хешируются через BCrypt (work factor 11).
-- Сессии хранятся в SQLite, cookie — HttpOnly + SameSite=Lax.
+- Данные контейнеров — в `data/`, **не коммитятся**.
+- Пароли в `.env` — **не коммитятся**.
+- SQLite в **WAL-режиме** (`journal_mode=WAL`) для параллельного чтения/записи.
+- Пароли хешируются **BCrypt** (work factor 11).
+- Сессии — в SQLite, cookie — `HttpOnly` + `SameSite=Lax`.
+- Nginx использует `resolver 127.0.0.11` для Docker DNS.
+- `restart: unless-stopped` — автозапуск после ребута.
+
+## 📖 Документация
+
+- **[ARCHITECTURE.md](docs/ARCHITECTURE.md)** — подробное устройство, все термины.
+- **[TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)** — проблемы и решения.
