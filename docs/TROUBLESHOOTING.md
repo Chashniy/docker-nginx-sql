@@ -14,18 +14,24 @@
 2. [Docker: bind-mount файлов](#docker-bind-mount-файлов)
 3. [Docker: сборка frontend](#docker-сборка-frontend)
 4. [Docker: logging driver](#docker-logging-driver)
-5. [Nginx: конфигурация](#nginx-конфигурация)
-6. [Nginx: proxy_pass и переменные](#nginx-proxy_pass-и-переменные)
-7. [Nginx: POST без тела](#nginx-post-без-тела)
-8. [SQLite: readonly database](#sqlite-readonly-database)
-9. [SQLite: WAL-режим](#sqlite-wal-режим)
-10. [EF Core: Guid vs string](#ef-core-guid-vs-string)
-11. [EF Core: snake_case vs PascalCase](#ef-core-snake_case-vs-pascalcase)
-12. [ASP.NET: AddHostedService после Build](#aspnet-addhostedservice-после-build)
-13. [TypeScript: top-level statements](#typescript-top-level-statements)
-14. [TypeScript: опечатки в именах типов](#typescript-опечатки-в-именах-типов)
-15. [React: пустые файлы](#react-пустые-файлы)
-16. [React: default vs named export](#react-default-vs-named-export)
+5. [Docker Compose: Access denied](#docker-compose-access-denied)
+6. [Docker Compose: изменения не подхватываются](#docker-compose-изменения-не-подхватываются)
+7. [Docker Compose: depends_on без healthcheck](#docker-compose-depends_on-без-healthcheck)
+8. [Nginx: конфигурация](#nginx-конфигурация)
+9. [Nginx: proxy_pass и переменные](#nginx-proxy_pass-и-переменные)
+10. [Nginx: POST без тела](#nginx-post-без-тела)
+11. [SQLite: readonly database](#sqlite-readonly-database)
+12. [SQLite: WAL-режим](#sqlite-wal-режим)
+13. [EF Core: Guid vs string](#ef-core-guid-vs-string)
+14. [EF Core: snake_case vs PascalCase](#ef-core-snake_case-vs-pascalcase)
+15. [ASP.NET: AddHostedService после Build](#aspnet-addhostedservice-после-build)
+16. [TypeScript: top-level statements](#typescript-top-level-statements)
+17. [TypeScript: опечатки в именах типов](#typescript-опечатки-в-именах-типов)
+18. [TypeScript: Property 'role' does not exist](#typescript-property-role-does-not-exist)
+19. [React: пустые файлы](#react-пустые-файлы)
+20. [React: default vs named export](#react-default-vs-named-export)
+21. [Frontend: кнопки накладываются](#frontend-кнопки-накладываются)
+22. [Fish: $ в SQL-запросах](#fish--в-sql-запросах)
 
 ---
 
@@ -231,6 +237,196 @@ sudo systemctl restart docker
 Читать логи через `journalctl`:
 ```bash
 sudo journalctl CONTAINER_NAME=dns-backend --since "10 minutes ago"
+```
+
+---
+
+## Docker Compose: Access denied
+
+### Симптом
+
+```
+MySqlConnector.MySqlException (0x80004005): Access denied for user 'clock_user'@'172.19.0.4' (using password: YES)
+```
+
+Backend **падает** на `/api/auth/login` (500), но `/api/health` работает (потому что health **не лезет** в MariaDB).
+
+### Причина
+
+Пароли в `.env` **не совпадают** с **реальными** паролями MariaDB.
+
+MariaDB **инициализирует** пользователя **только при первой** инициализации (когда `data/db-data/` **пустая**). Если **меняешь** `.env` **после** — MariaDB **не знает** про **новые** пароли.
+
+**Пример:** ты запускал **раньше** через `docker run` с `MARIADB_PASSWORD=clock_pass`. Потом **перешёл** на `docker compose` с `MARIADB_PASSWORD=clock_pass_change_me`. MariaDB **всё ещё** хочет **`clock_pass`**.
+
+### Решение
+
+**Вариант A (быстро): вернуть старые пароли в `.env`**
+
+```env
+MARIADB_ROOT_PASSWORD=root_secret
+MARIADB_PASSWORD=clock_pass
+MARIADB_CONNECTION=...Password=clock_pass;
+```
+
+Затем:
+```bash
+sudo docker compose down
+sudo docker compose up -d
+```
+
+**`down` + `up` обязательны!** `restart` **не перечитывает** `.env`.
+
+**Вариант B (правильно): сменить пароли в MariaDB**
+
+```bash
+sudo docker exec -it dns-mariadb mariadb -uroot -proot_secret
+```
+```sql
+ALTER USER 'clock_user'@'%' IDENTIFIED BY 'clock_pass_change_me';
+ALTER USER 'root'@'localhost' IDENTIFIED BY 'root_secret_change_me';
+FLUSH PRIVILEGES;
+EXIT;
+```
+
+**Если `root_secret` не подходит** — сначала **проверь**, **какой** работает:
+```bash
+sudo docker exec dns-mariadb mariadb -uroot -proot_secret -e "SELECT 1;"
+```
+
+### Код
+
+`Program.cs`:
+```csharp
+var mariaConnectionString = builder.Configuration.GetConnectionString("MariaDB")
+    ?? "Server=dns-mariadb;...Password=clock_pass;";
+```
+
+`.env`:
+```env
+MARIADB_CONNECTION=...Password=clock_pass_change_me;
+```
+
+`database` → `Access denied`.
+
+### Правило
+
+`.env` **должен** совпадать с **реальными** паролями MariaDB. Если **меняешь** `.env` для **существующей** БД — **смени** пароль **в БД** (`ALTER USER`) **или** верни **старые** пароли в `.env`.
+
+---
+
+## Docker Compose: изменения не подхватываются
+
+### Симптом
+
+Поменял код **или** `.env`, запустил `docker compose up -d` — **ничего не изменилось**. **Второй** запуск — **заработало**.
+
+### Причина
+
+**Два** разных механизма:
+
+1. **`docker compose up -d`** — **запускает** контейнеры из **уже существующих** образов. **НЕ пересобирает**.
+2. **`docker compose restart`** — **перезапускает** контейнер с **теми же** env. **НЕ перечитывает** `.env`.
+
+**Кэш Docker** тоже может помешать: если слой **не изменился**, Docker берёт его **из кэша**.
+
+### Решение
+
+**Изменил код** → пересобрать:
+```bash
+sudo docker compose up -d --build
+```
+
+**Если не помогло** → полный сброс кэша:
+```bash
+sudo docker compose build --no-cache
+sudo docker compose up -d
+```
+
+**Изменил `.env`** → **`down` + `up`**:
+```bash
+sudo docker compose down
+sudo docker compose up -d
+```
+
+**`restart` не работает** для `.env` — нужен **`down`**.
+
+### Код
+
+```bash
+# НЕ работает, если менял .env
+sudo docker compose restart backend
+
+# НЕ работает, если менял код
+sudo docker compose up -d
+
+# Работает для кода
+sudo docker compose up -d --build
+
+# Работает для .env
+sudo docker compose down && sudo docker compose up -d
+```
+
+### Правило
+
+| Что менял | Команда |
+|---|---|
+| Код | `docker compose up -d --build` |
+| `.env` | `docker compose down && docker compose up -d` |
+| Dockerfile | `docker compose build --no-cache && up -d` |
+| Ничего | `docker compose restart` |
+
+---
+
+## Docker Compose: depends_on без healthcheck
+
+### Симптом
+
+Backend **падает** при `docker compose up -d`:
+```
+MySqlException: Unable to connect to any of the specified MySQL hosts.
+```
+
+Но **вручную** (`docker compose restart backend`) — **работает**.
+
+### Причина
+
+`depends_on: [mariadb]` **только** задаёт **порядок запуска**. MariaDB **стартует раньше**, но **не готова** принимать соединения — **инициализируется 10–20 секунд**. Backend **лезет** к ней **сразу** — получает **отказ**.
+
+### Решение
+
+Добавить **`healthcheck`** для MariaDB и **`condition: service_healthy`** в `depends_on`:
+
+```yaml
+services:
+  mariadb:
+    image: mariadb:11
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  backend:
+    depends_on:
+      mariadb:
+        condition: service_healthy   # ← ждём «здоровую» MariaDB
+```
+
+Теперь backend **стартует** только когда MariaDB **готова** принимать соединения.
+
+### Код
+
+```yaml
+# НЕ работает (просто порядок)
+depends_on:
+  - mariadb
+
+# Работает (ждём готовности)
+depends_on:
+  mariadb:
+    condition: service_healthy
 ```
 
 ---
@@ -539,6 +735,7 @@ modelBuilder.Entity<User>(entity =>
     entity.Property(e => e.Id).HasColumnName("id").HasColumnType("char(36)");
     entity.Property(e => e.Username).HasColumnName("username").HasMaxLength(64);
     entity.Property(e => e.PasswordHash).HasColumnName("password_hash").HasMaxLength(255);
+    entity.Property(e => e.Role).HasColumnName("role").HasMaxLength(16);
     entity.Property(e => e.CreatedAt).HasColumnName("created_at");
 });
 ```
@@ -673,6 +870,60 @@ public Guide Id { get; set; } = string.Empty;   // ← две ошибки: Guid
 
 ---
 
+## TypeScript: Property 'role' does not exist
+
+### Симптом
+
+```
+error TS2339: Property 'role' does not exist on type 'User'.
+src/components/ProtectedRoute.tsx(21,28)
+```
+
+**Vite dev-server** работает, но **`vite build`** — падает.
+
+### Причина
+
+В **`AuthContext.tsx`** интерфейс `User` **не содержит** поля `role`. Но **`ProtectedRoute.tsx`** **обращается** к `user.role`. TypeScript **не пропускает** такое.
+
+**Vite dev** (`npm run dev`) **игнорирует** ошибки TypeScript — компилирует **на лету** через esbuild. **`vite build`** запускает **`tsc -b`** — **полную** проверку типов.
+
+### Решение
+
+**1.** Обновить **`AuthContext.tsx`**:
+```typescript
+interface User {
+  id: string;
+  username: string;
+  role: string;   // ← добавили
+}
+```
+
+**2.** Пересобрать:
+```bash
+cd apps/frontend
+sudo docker build --network=host -t dns-frontend:dev .
+```
+
+### Код
+
+`AuthContext.tsx`:
+```typescript
+interface User {
+  id: string;
+  username: string;
+  // role: string;   ← забыли
+}
+```
+
+`ProtectedRoute.tsx`:
+```tsx
+if (requireAdmin && user.role !== 'admin') {   // ← ошибка
+```
+
+**Правило:** если **добавляешь** поле в **тип** — **проверь**, что оно **есть** во **всех** файлах, которые **используют** этот тип.
+
+---
+
 ## React: пустые файлы
 
 ### Симптом
@@ -773,6 +1024,109 @@ import AuthButton from './AuthButton';   // ← default-импорт
 
 ---
 
+## Frontend: кнопки накладываются
+
+### Симптом
+
+В шапке **две кнопки** («Админка» и «Выйти») **накладываются** друг на друга. Видна **только одна**.
+
+### Причина
+
+Обе кнопки имеют `position: absolute` с **одинаковыми** `top: 1.5rem; right: 1.5rem`. Они **вырываются** из потока и **прилипают** к **одной** точке.
+
+```css
+.auth-button {
+  position: absolute;   /* ← каждая кнопка absolute */
+  top: 1.5rem;
+  right: 1.5rem;
+}
+```
+
+### Решение
+
+**1.** Обернуть кнопки в **контейнер** `.app__header-actions`.
+
+**2.** `position: absolute` — **на контейнер**, **не** на кнопки:
+```css
+.app__header-actions {
+  position: absolute;
+  top: 1.5rem;
+  right: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  align-items: flex-end;
+}
+
+.auth-button {
+  /* position: static — убрали absolute */
+  padding: 0.5rem 1rem;
+  /* ... */
+}
+```
+
+### Код
+
+```css
+/* НЕ работает: обе кнопки absolute, накладываются */
+.auth-button {
+  position: absolute;
+  top: 1.5rem;
+  right: 1.5rem;
+}
+```
+
+---
+
+## Fish: $ в SQL-запросах
+
+### Симптом
+
+```
+fish: $. is not a valid variable in fish.
+  "SELECT json_extract(payload, '$.created_by') FROM outbox;"
+                                              ^
+```
+
+### Причина
+
+В **fish** символ `$` — **всегда** начало **переменной**. `$` в **строке** (`'$.created_by'`) **интерпретируется** как **переменная** — отсюда ошибка.
+
+**В bash** — `$` **тоже** переменная, но `'$.created_by'` в **одинарных** кавычках — **литерал**. В **fish** — **нет**, `$` **работает** **внутри** кавычек.
+
+### Решение
+
+**1.** Экранировать `$`:
+```bash
+sudo sqlite3 ~/.localrepo/.../app.db \
+  "SELECT json_extract(payload, '\$.created_by') FROM outbox;"
+```
+
+**2.** Или **избегать** `$` в запросе:
+```bash
+sudo sqlite3 ~/.localrepo/.../app.db "SELECT payload FROM outbox;"
+```
+`payload` — **весь** JSON. **Видно** `created_by` **глазами**.
+
+**3.** Или использовать **`bash -c`**:
+```bash
+bash -c 'sudo sqlite3 ~/.localrepo/.../app.db "SELECT json_extract(payload, \"\$.created_by\") FROM outbox;"'
+```
+
+### Код
+
+```bash
+# В fish — НЕ работает
+sudo sqlite3 app.db "SELECT json_extract(payload, '$.created_by') FROM outbox;"
+
+# В fish — работает
+sudo sqlite3 app.db "SELECT json_extract(payload, '\$.created_by') FROM outbox;"
+```
+
+**Правило:** в **fish** экранируй `$` как `\$`, или **избегай** `$` в SQL. Или используй **bash**.
+
+---
+
 ## Сводная таблица
 
 | # | Проблема | Симптом | Решение |
@@ -782,17 +1136,24 @@ import AuthButton from './AuthButton';   // ← default-импорт
 | 3 | `.dockerignore` пустой | `tsc: not found` | Заполнить `.dockerignore` |
 | 4 | `package-lock.json` glibc | `Exit handler never called` | Удалить lock + `node_modules` |
 | 5 | Logging driver `journald` | `does not support reading` | Переключить на `json-file` |
-| 6 | `events` не в главном конфиге | `no "events" section` | Полный конфиг в `nginx.conf` |
-| 7 | `events` в `conf.d` | `"events" not allowed here` | Фрагмент в `conf.d` |
-| 8 | `proxy_pass $var/api/` | `404 от Nginx` | Убрать `/api/` |
-| 9 | `POST` без тела | `400 от Nginx` | `-d '{}'` или `fetch` |
-| 10 | SQLite root | `readonly database` | `sudo sqlite3` |
-| 11 | EF Core `string` vs `Guid` | `InvalidCastException` | Модель `Guid` |
-| 12 | `AddHostedService` после `Build` | Сервис не стартует | Перенести **до** `Build()` |
-| 13 | Второй `Program.cs` | `CS8802` | Удалить лишний |
-| 14 | `Guide` vs `Guid` | `CS0246` | Исправить опечатку |
-| 15 | Пустой файл (nano) | Белая страница | Сохранить через `Ctrl+O` |
-| 16 | `default` vs `named` export | `doesn't provide default` | `export default` |
+| 6 | **Пароли `.env` ≠ MariaDB** | **`Access denied`** | **Вернуть старые пароли или `ALTER USER`** |
+| 7 | **`up` без `--build`** | **Изменения не подхватились** | **`--build` или `--no-cache`** |
+| 8 | **`restart` и `.env`** | **Изменения не подхватились** | **`down` + `up`** |
+| 9 | **`depends_on` без `condition`** | **Backend падает на старте** | **`condition: service_healthy`** |
+| 10 | `events` не в главном конфиге | `no "events" section` | Полный конфиг в `nginx.conf` |
+| 11 | `events` в `conf.d` | `"events" not allowed here` | Фрагмент в `conf.d` |
+| 12 | `proxy_pass $var/api/` | `404 от Nginx` | Убрать `/api/` |
+| 13 | `POST` без тела | `400 от Nginx` | `-d '{}'` или `fetch` |
+| 14 | SQLite root | `readonly database` | `sudo sqlite3` |
+| 15 | EF Core `string` vs `Guid` | `InvalidCastException` | Модель `Guid` |
+| 16 | `AddHostedService` после `Build` | Сервис не стартует | Перенести **до** `Build()` |
+| 17 | Второй `Program.cs` | `CS8802` | Удалить лишний |
+| 18 | `Guide` vs `Guid` | `CS0246` | Исправить опечатку |
+| 19 | **`role` не в типе `User`** | **`TS2339`** | **Добавить `role` в `AuthContext`** |
+| 20 | Пустой файл (nano) | Белая страница | Сохранить через `Ctrl+O` |
+| 21 | `default` vs `named` export | `doesn't provide default` | `export default` |
+| 22 | **Кнопки absolute** | **Накладываются** | **`absolute` на контейнер, не на кнопки** |
+| 23 | **`$` в fish** | **`not a valid variable`** | **Экранировать `\$` или bash** |
 
 ---
 
@@ -809,6 +1170,8 @@ import AuthButton from './AuthButton';   // ← default-импорт
 ## 📖 Полезные ссылки
 
 - [Docker troubleshooting](https://docs.docker.com/config/daemon/)
+- [Docker Compose troubleshooting](https://docs.docker.com/compose/)
 - [Nginx pitfalls](https://nginx.org/en/docs/)
 - [EF Core migrations](https://learn.microsoft.com/ef/core/managing-schemas/migrations/)
 - [SQLite WAL](https://sqlite.org/wal.html)
+- [React Router](https://reactrouter.com)

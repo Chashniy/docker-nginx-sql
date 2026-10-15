@@ -11,8 +11,10 @@
 5. [Как работает авторизация](#как-работает-авторизация)
 6. [Как работает outbox](#как-работает-outbox)
 7. [Docker: контейнеры и сети](#docker-контейнеры-и-сети)
-8. [Frontend: React + Vite](#frontend-react--vite)
-9. [Backend: ASP.NET Core](#backend-aspnet-core)
+8. [Docker Compose](#docker-compose)
+9. [Frontend: React + Vite](#frontend-react--vite)
+10. [Backend: ASP.NET Core](#backend-aspnet-core)
+11. [Роли и права доступа](#роли-и-права-доступа)
 
 ---
 
@@ -274,11 +276,14 @@ POST /api/auth/register { "username": "admin", "password": "admin123" }
    ↓
 1. Валидация: username >= 3, password >= 6
 2. Проверка: username не занят? (SELECT FROM users WHERE username = ...)
-3. Создание: INSERT INTO users (id, username, password_hash, created_at)
+3. Проверка: первый ли пользователь?
+   ↓ Если БД users пуста — role = 'admin'
+   ↓ Иначе — role = 'user'
+4. Создание: INSERT INTO users (id, username, password_hash, role, created_at)
    ↓ password_hash = BCrypt.Hash("admin123")
-4. Создание сессии: INSERT INTO sessions (id, user_id, username, expires_at)
-5. Set-Cookie: session_id=<session-id>; HttpOnly; SameSite=Lax
-6. Ответ: 200 OK + { id, username }
+5. Создание сессии: INSERT INTO sessions (id, user_id, username, expires_at)
+6. Set-Cookie: session_id=<session-id>; HttpOnly; SameSite=Lax
+7. Ответ: 200 OK + { id, username, role }
 ```
 
 ### Логин
@@ -289,7 +294,7 @@ POST /api/auth/login { "username": "admin", "password": "admin123" }
 1. SELECT FROM users WHERE username = 'admin'
 2. BCrypt.Verify("admin123", user.password_hash)
 3. Если ок → создаём сессию (как в регистрации)
-4. Set-Cookie + 200 OK
+4. Set-Cookie + 200 OK + { id, username, role }
 ```
 
 ### Защищённый запрос
@@ -301,7 +306,8 @@ GET /api/auth/me (с cookie session_id=abc123)
 2. SELECT FROM sessions WHERE id = 'abc123'
 3. Проверка expires_at > now
 4. context.Items["user_id"] = session.user_id
-5. Endpoint /me: берёт user_id из Items, возвращает 200 OK
+5. Endpoint /me: берёт user_id из Items, идёт в MariaDB за user.role
+6. Возвращает 200 OK + { id, username, role }
 ```
 
 ### Выход
@@ -449,6 +455,115 @@ dns-backend → localhost:3306     ← НЕ работает
 
 ---
 
+## Docker Compose
+
+### Зачем
+
+С `docker run` надо **вручную** прописывать **4 длинные** команды. Легко **ошибиться**, **забыть** параметр, **не поднять** в **правильном** порядке.
+
+**`docker-compose.yml`** — **декларативное** описание **всех** сервисов. **Одна** команда `docker compose up -d` — **всё** поднимает.
+
+### `docker-compose.yml` — структура
+
+```yaml
+name: docker-nginx-sql
+
+services:
+  mariadb:
+    image: mariadb:11
+    container_name: dns-mariadb
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD}
+      MARIADB_DATABASE: ${MARIADB_DATABASE}
+      MARIADB_USER: ${MARIADB_USER}
+      MARIADB_PASSWORD: ${MARIADB_PASSWORD}
+    volumes:
+      - ./data/db-data:/var/lib/mysql
+      - ./db/mariadb-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - dns-net
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  backend:
+    image: dns-backend:dev
+    container_name: dns-backend
+    restart: unless-stopped
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    environment:
+      ConnectionStrings__MariaDB: ${MARIADB_CONNECTION}
+    volumes:
+      - ./data/backend:/app/data
+    networks:
+      - dns-net
+
+  frontend:
+    image: dns-frontend:dev
+    container_name: dns-frontend
+    restart: unless-stopped
+    networks:
+      - dns-net
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: dns-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./config/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - dns-net
+
+networks:
+  dns-net:
+    driver: bridge
+```
+
+### Ключевые концепции
+
+**1. `depends_on` + `condition: service_healthy`**
+Backend **не стартует**, пока MariaDB **не готова**. **Без** этого — backend **упадёт**, потому что БД **ещё инициализируется**.
+
+**2. `healthcheck`**
+Docker **периодически** проверяет сервис. `mariadb` — `healthcheck.sh --connect`. Пока не **`healthy`** — `depends_on` **не пускает** backend.
+
+**3. `restart: unless-stopped`**
+После **ребута** хоста Docker **сам** поднимает контейнеры. **Если** остановил **вручную** — **не** поднимет.
+
+**4. `environment` + `.env`**
+`${MARIADB_PASSWORD}` **подставляется** из **`.env`**. **Секреты** — **отдельно** от кода.
+
+**5. `ConnectionStrings__MariaDB`** — **двойное подчёркивание**
+В ASP.NET Core `:` в **конфиге** → `__` в **env**. `ConnectionStrings:MariaDB` → `ConnectionStrings__MariaDB`.
+
+### `down` vs `restart` vs `up`
+
+| Команда | Что делает | Когда |
+|---|---|---|
+| `docker compose up -d` | Создаёт/запускает | Запуск |
+| `docker compose down` | **Удаляет** контейнеры | Остановка + **чистая** пересборка |
+| `docker compose restart` | **Перезапускает** | Быстро перезапустить |
+| `docker compose up -d --build` | **Пересобирает** образы + запускает | Изменил код |
+| `docker compose build --no-cache` | Пересборка **без кэша** | Если `--build` не помог |
+| `docker compose down -v` | Удаляет + volumes | **ВНИМАНИЕ**: удаляет данные |
+
+**`restart` не перечитывает `.env`.** Если меняешь `.env` — `down` + `up`.
+
+**`up` не пересобирает образы.** Если меняешь код — `--build`.
+
+---
+
 ## Frontend: React + Vite
 
 ### React
@@ -486,6 +601,56 @@ useEffect(() => {
   const timer = setInterval(() => setNow(new Date()), 1000);
   return () => clearInterval(timer);   // cleanup при unmount
 }, []);   // [] — выполнить один раз
+```
+
+### Context
+
+**Глобальное состояние** для компонентов. `createContext` + `useContext`:
+```tsx
+const AuthContext = createContext<AuthContextValue | null>(null);
+
+export function AuthProvider({ children }) {
+  const [user, setUser] = useState<User | null>(null);
+  return (
+    <AuthContext.Provider value={{ user, login, logout, register }}>
+      {children}
+    </AuthContext.Provider>
+  );
+}
+
+export function useAuth() {
+  const ctx = useContext(AuthContext);
+  if (!ctx) throw new Error('useAuth must be used within AuthProvider');
+  return ctx;
+}
+```
+
+**Зачем:** `user` доступен **в любом** компоненте без **пропсов**.
+
+### React Router
+
+**SPA-роутинг.** Заменяет **полную** перезагрузку страницы на **клиентские** переходы.
+```tsx
+<Routes>
+  <Route path="/" element={<HomePage />} />
+  <Route path="/login" element={<LoginPage />} />
+  <Route path="/admin" element={<ProtectedRoute requireAdmin><AdminPage /></ProtectedRoute>} />
+</Routes>
+```
+
+**`<Link to="/login">`** — SPA-переход. **`<a href="/login">`** — полная перезагрузка.
+
+### ProtectedRoute
+
+**Обёртка** для страниц, требующих **авторизации**.
+```tsx
+function ProtectedRoute({ children, requireAdmin = false }) {
+  const { user, loading } = useAuth();
+  if (loading) return <div>Загрузка...</div>;
+  if (!user) return <Navigate to="/login" replace />;
+  if (requireAdmin && user.role !== 'admin') return <Navigate to="/" replace />;
+  return <>{children}</>;
+}
 ```
 
 ### Vite
@@ -573,6 +738,7 @@ modelBuilder.Entity<User>(entity =>
 {
     entity.ToTable("users");
     entity.Property(e => e.Id).HasColumnName("id").HasColumnType("char(36)");
+    entity.Property(e => e.Role).HasColumnName("role").HasMaxLength(16);
 });
 ```
 
@@ -599,6 +765,35 @@ public class OutboxSyncService : BackgroundService
 
 **Зачем:** синхронизация outbox → MariaDB. Работает **в фоне**, не блокирует запросы.
 
+### EndpointFilter
+
+**Фильтр** для группы эндпоинтов. Может **прервать** выполнение (вернуть `401`/`403`).
+```csharp
+public class RequireAdminFilter : IEndpointFilter
+{
+    public async ValueTask<object?> InvokeAsync(
+        EndpointFilterInvocationContext context,
+        EndpointFilterDelegate next)
+    {
+        var http = context.HttpContext;
+        var userId = http.Items[SessionMiddleware.UserIdKey] as string;
+        if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
+
+        var db = http.RequestServices.GetRequiredService<MariaDbContext>();
+        var user = await db.Users.FirstOrDefaultAsync(u => u.Id == Guid.Parse(userId));
+        if (user?.Role != "admin") return Results.Forbid();
+
+        return await next(context);
+    }
+}
+```
+
+**Использование:**
+```csharp
+var group = app.MapGroup("/api/admin")
+    .AddEndpointFilter<RequireAdminFilter>();
+```
+
 ### HttpResponse / HttpContext
 
 **Контекст** запроса. Содержит:
@@ -613,8 +808,53 @@ public class OutboxSyncService : BackgroundService
 - `Results.Ok(data)` → 200.
 - `Results.BadRequest(error)` → 400.
 - `Results.Unauthorized()` → 401.
+- `Results.Forbid()` → 403.
 - `Results.Conflict(error)` → 409.
 - `Results.Accepted(uri, data)` → 202.
+
+---
+
+## Роли и права доступа
+
+### Две роли
+
+| Роль | Права |
+|---|---|
+| **`user`** | Публичные страницы, `/api/time-records`, `/api/auth/*` |
+| **`admin`** | Всё то же + `/api/admin/*` (список, редактирование, удаление) |
+
+### Как назначается
+
+**Первый** зарегистрированный пользователь — **`admin`**. Остальные — **`user`**.
+
+```csharp
+var isFirstUser = !await db.Users.AnyAsync();
+var user = new User
+{
+    Id = Guid.NewGuid(),
+    Username = request.Username,
+    PasswordHash = hasher.Hash(request.Password),
+    Role = isFirstUser ? "admin" : "user",
+    CreatedAt = DateTime.UtcNow
+};
+```
+
+### Как проверяется
+
+**На backend** — `RequireAdminFilter` **перед** `/api/admin/*`.
+**На frontend** — `ProtectedRoute requireAdmin`.
+
+**Если роль не `admin`** — backend возвращает **`403 Forbidden`**, frontend **редиректит** на `/`.
+
+### Почему **не в сессии**
+
+Роль **не** хранится в **сессии**. `SessionMiddleware` кладёт только `user_id` и `username`. При **каждом** запросе к `/api/admin/*` фильтр **читает** `role` **из MariaDB**.
+
+**Зачем так:**
+- Если **сменишь** роль — **не надо** пересоздавать сессию.
+- Нет **риска**, что сессия «**устареет**».
+
+**Минус:** лишний **запрос** в БД на каждый admin-запрос. Для учебного проекта — **не критично**.
 
 ---
 
@@ -632,8 +872,10 @@ public class OutboxSyncService : BackgroundService
 ## 📖 Полезные ссылки
 
 - [React docs](https://react.dev)
+- [React Router docs](https://reactrouter.com)
 - [Vite docs](https://vitejs.dev)
 - [ASP.NET Core docs](https://learn.microsoft.com/aspnet/core)
 - [EF Core docs](https://learn.microsoft.com/ef/core)
 - [Docker docs](https://docs.docker.com)
+- [Docker Compose docs](https://docs.docker.com/compose/)
 - [Nginx docs](https://nginx.org/en/docs)
